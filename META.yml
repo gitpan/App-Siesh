@@ -1,10 +1,9 @@
 ---
 name: App-Siesh
-version: 0.06
+version: 0.07
 author:
   - 'Mario Domgoergen <mario@domgoergen.com>'
-  - 'Mario Domgoergen <mario@domgoergen.com>'
-abstract: Sieve Shell
+abstract: interactive sieve shell
 license: perl
 resources:
   license: ~
