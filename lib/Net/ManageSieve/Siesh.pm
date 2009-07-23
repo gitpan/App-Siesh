@@ -4,6 +4,7 @@ use warnings;
 use strict;
 use File::Temp qw/tempfile/;
 use Net::ManageSieve;
+use IO::Prompt;
 use parent qw(Net::ManageSieve);
 
 our $VERSION = '0.05';
@@ -15,8 +16,17 @@ sub deactivate {
 
 sub movescript {
     my ( $self, $source, $target ) = @_;
+    my $is_active = $self->is_active($source);
+
+    ## We can't delete a active script, so we just deactivate it ...
+    $self->deactivate() if $is_active;
+
     $self->copyscript( $source, $target );
     $self->deletescript($source) or $self->error($@);
+
+    ## ... and activate the target later
+    $self->setactive($target) if $is_active;
+    return 1;
 }
 
 sub copyscript {
@@ -65,6 +75,17 @@ sub listscripts {
     return wantarray ? ( $scripts, $active ) : $scripts;
 }
 
+sub print_script_listing {
+    my $sieve = shift;
+    my ( $scripts, $active ) = $sieve->listscripts()
+      or die $sieve->error() . "\n";
+    for my $script ( @{$scripts} ) {
+        my $marker = '';
+        $marker = ' *' if $script eq $active;
+        print "${script}${marker}\n";
+    }
+}
+
 sub error {
     my ( $self, $error ) = @_;
     if ( defined($error) ) {
@@ -72,6 +93,59 @@ sub error {
         return undef;
     }
     return $self->{_last_error};
+}
+
+sub cat {
+    my $sieve = shift;
+    my $content = "";
+    for my $script (@_) {
+        my $new_content = $sieve->getscript($script)
+          or die $sieve->error() . "\n";
+        $content .= $new_content;
+    }
+    print $content;
+}
+
+sub delete {
+    my $sieve = shift;
+    for my $script (@_) {
+        $sieve->deletescript($script) or die $sieve->error() . "\n";
+    }
+}
+
+sub view_script {
+    my ($sieve,$script) = @_;
+    my ( $fh, $filename ) = $sieve->temp_scriptfile($script);
+    unless ($fh) { die $sieve->error() . "\n" }
+    my $pager = $ENV{'PAGER'} || "less";
+    system( $pager, $filename ) == 0 or die "$!\n";
+    close $fh;
+}
+
+sub edit_script {
+    my ($sieve,$script) = @_;
+    my ( $fh, $filename ) = $sieve->temp_scriptfile( $script, 1 );
+    unless ($fh) { die $sieve->error() . "\n" }
+    my $editor = $ENV{'VISUAL'} || $ENV{'EDITOR'} || "vi";
+    do {
+        system( $editor, $filename ) == 0 or die "$!\n";
+      } until (
+        $sieve->putfile( $filename, $script )
+          || !do { print "$@\n"; prompt( "Re-edit script? ", -yn ) }
+      );
+    close $fh;
+
+}
+
+sub get_active {
+	my ($self) = @_;
+	my (undef,$active) = $self->listscripts();
+	return $active;
+}
+
+sub is_active {
+	my ($self,$script) = @_;
+	return $self->get_active() eq $script;
 }
 
 1;    # End of Net::ManageSieve::Siesh
@@ -115,8 +189,10 @@ as argument.
 
 =item C<movescript($oldscriptname,$newscriptname)>
 
-Renames the script. This functions is equivalent to copying a script
-and then deleting the source script.
+Renames the script. This functions is equivalent to copying a script and
+then deleting the source script. In case you try to move the currently
+active script, it's deactivated first and later reactivated unter it's
+new name.
 
 =item C<copyscript($oldscriptname,$newscriptname)>
 
@@ -142,12 +218,21 @@ Downloads the script names <$scriptname> to the file specified by C<$file>.
 Returns a list of scripts and the active script. This function overwrites
 listscripts provided by Net::ManageSieve in order to return a more
 sane data structure. It returns a reference to an array, that holds all
-scripts, and a scalar with the name of the active script in list context and just the array reference in scalar context.
-=item C<error()>
+scripts, and a scalar with the name of the active script in list context
+and just the array reference in scalar context.  =item C<error()>
 
 Returns $@ or $! of a previous failed method. Please notice, that this
 method overwrites the method of the same name in C<Net::ManageSieve>
 and just returns the error mesage itself.
+
+=item C<is_active($script)>
+
+Returns true if $script is the currently active script and false if not.
+
+=item C<get_active()>
+
+Returns the name of the currently active script and the empty string if
+there is not active script.
 
 =back
 
@@ -157,9 +242,11 @@ Mario Domgoergen, C<< <mario at domgoergen.com> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-app-siesh at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-Siesh>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+Please report any bugs or feature requests to
+C<bug-app-siesh at rt.cpan.org>, or through the web interface at
+L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-Siesh>.  I will be
+notified, and then you'll automatically be notified of progress on your
+bug as I make changes.
 
 =head1 SEE ALSO
 
