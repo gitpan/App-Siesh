@@ -2,32 +2,46 @@ NAME
     siesh - interactive sieve shell
 
 SYNOPSIS
-    siesh --user USER --host SERVER
+    $ siesh --debug --user USER --host SERVER --tls {require|auto} --port
+    PORT
 
 DESCRIPTION
     Siesh provides a shell-like interface for manipulating sieve scripts
     using the ManageSieve protocol.
 
 OPTIONS
+    --debug|-d
+        Enable debugging.
+
     --user|-u USERNAME
         Specifies the username to use when logging into the sieve server.
         This option defaults to the value of the environment variable
         "USER".
 
-    --host||-h HOST
+    --host|-h HOST
         Specifies the machine to connect to. Defaults to "imap".
+
+    --port|-p PORT
+        Specifies the remote port to connect to. Defaults to 2000.
+
+    --tls|-t {require|auto}
+        Specifies whether TLS is required ("require") or optional ("auto").
+        Defaults to unset, disabling TLS.
 
 CONFIGURATION FILE
     When siesh is invoked, it first reads configurations variables from
     /etc/siesh.conf or ~/.siesh.conf if one of these files exist. The file
-    is structured as a set of lines with name and values seperated by a
-    equal signs.
+    is structured as a set of lines with name and values seperated by an
+    equal sign.
 
-            user = mario
-            host = sieve.example.com
+            user  = mario
+            host  = sieve.example.com
+            port  = 2000
+            tls   = require
+            debug = 1
 
-    Currently only these both variables are recognized. Values are overriden
-    by the configurations options specified on the command line.
+    Currently only these two variables are recognized. Values are overriden
+    by options specified on the command line.
 
 COMMANDS
     list
@@ -37,18 +51,18 @@ COMMANDS
         Synonyms: ls
 
     delete *script-name* *...*
-        Deletes a script. It's not possible to delete a active script, so
-        please use deactivate first. There's no way to undelete this
-        message.
+        Deletes a script. It's not possible to delete the currently active
+        script, so please use deactivate first. There's no way to undelete a
+        deleted script.
 
         Synonyms: rm
 
     edit *script-name*
         Edits a script on the server without downloading it explicitly to
-        your disk first. Under the hood it creates a temporary file, put the
-        script content in it and calls $ENV{EDITOR} on it. After that the
-        script is uploaded back. It's also possible to create and edit a new
-        script with this command.
+        your disk first. Under the hood it creates a temporary file, puts
+        the script content in it and calls $ENV{EDITOR} on it. After that
+        the script is uploaded back. It's also possible to create and edit a
+        new script with this command.
 
         If your script is syntactical incorrect, you will be prompted to
         re-edit the file or throw away your changes.
@@ -56,8 +70,8 @@ COMMANDS
     activate *script-name*
         Activates the listed script. User may have multiple Sieve scripts on
         the server, yet only one script may be used for filtering of
-        incoming messages. This is the active script. Users may have zero or
-        one active scripts
+        incoming messages. This is called the active script. Users may have
+        zero or one active scripts
 
     deactivate
         Deactivate all scripts. Deactivation of all your scripts results in

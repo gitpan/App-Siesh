@@ -13,7 +13,7 @@ use Pod::Usage;
 use File::Temp qw/tempfile/;
 use Config::Find;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 my ( $user, $host, %config );
 
@@ -21,12 +21,29 @@ if ( my $filename = Config::Find->find ) {
     %config = %{ equal_sep($filename) };
 }
 
-my $result = GetOptions( \%config, 'user=s', 'host=s' ) or pod2usage(2);
+my $result = GetOptions( \%config,
+    'debug',
+    'user=s',
+    'host=s',
+    'port=s',
+    'tls=s'
+) or pod2usage(2);
 
+# Set defaults for Net::ManageSieve::Siesh construction
 $config{user} ||= $ENV{USER};
 $config{host} ||= 'imap';
 
-my $sieve = Net::ManageSieve::Siesh->new( $config{host}, tls => 'require', )
+my @params = ();
+
+foreach ('debug', 'port') {
+    push @params, ucfirst($_), $config{$_}
+        if defined $config{$_};
+}
+
+push @params, 'tls', $config{'tls'}
+    if defined $config{'tls'};
+
+my $sieve = Net::ManageSieve::Siesh->new( $config{host}, @params )
   or die "Can't connect to $config{host}: $!\n";
 
 my $password = prompt( "Password: ", -e => '*' );
@@ -67,7 +84,7 @@ my $term = new Term::ShellUI(
             proc    => \&list_scripts,
         },
         "activate" => {
-            desc    => "mark a script as active",
+            desc    => "Mark a script as active.",
             maxargs => 1,
             proc =>
               sub { $sieve->setactive(shift) or die $sieve->error() . "\n" },
@@ -228,7 +245,12 @@ siesh - interactive sieve shell
 
 =head1 SYNOPSIS
 
-siesh --user USER --host SERVER
+$ siesh
+    --debug 
+    --user USER 
+    --host SERVER 
+    --tls {require|auto} 
+    --port PORT
 
 =head1 DESCRIPTION
 
@@ -239,14 +261,26 @@ using the ManageSieve protocol.
 
 =over 4
 
+=item B<--debug>|B<-d>
+
+Enable debugging.
+
 =item B<--user>|B<-u> USERNAME
 
 Specifies the username to use when logging into the sieve server. This
 option defaults to the value of the environment variable C<USER>.
 
-=item B<--host|>|B<-h> HOST
+=item B<--host>|B<-h> HOST
 
 Specifies the machine to connect to. Defaults to C<imap>.
+
+=item B<--port>|B<-p> PORT
+
+Specifies the remote port to connect to. Defaults to C<2000>.
+
+=item B<--tls>|B<-t> {require|auto}
+
+Specifies whether TLS is required ("require") or optional ("auto"). Defaults to unset, disabling TLS.
 
 =back
 
@@ -255,13 +289,16 @@ Specifies the machine to connect to. Defaults to C<imap>.
 When siesh is invoked, it first reads configurations variables from
 F</etc/siesh.conf> or F<~/.siesh.conf> if one of these files exist. The
 file is structured as a set of lines with name and values seperated by
-a equal signs.
+an equal sign.
 
-	user = mario
-	host = sieve.example.com
+	user  = mario
+	host  = sieve.example.com
+	port  = 2000
+	tls   = require
+	debug = 1
 
-Currently only these both variables are recognized. Values are overriden
-by the configurations options specified on the command line.
+Currently only these two variables are recognized. Values are overriden
+by options specified on the command line.
 
 =head1 COMMANDS
 
@@ -276,8 +313,8 @@ Synonyms: B<ls>
 
 =item B<delete> I<script-name> I<...>
 
-Deletes a script. It's not possible to delete a active script, so please
-use deactivate first. There's no way to undelete this message.
+Deletes a script. It's not possible to delete the currently active script, so please
+use deactivate first. There's no way to undelete a deleted script.
 
 Synonyms: B<rm>
 
@@ -285,7 +322,7 @@ Synonyms: B<rm>
 
 Edits a script on the server without downloading it
 explicitly to your disk first. Under the hood it creates a temporary file,
-put the script content in it and calls C<$ENV{EDITOR}> on it. After that
+puts the script content in it and calls C<$ENV{EDITOR}> on it. After that
 the script is uploaded back. It's also possible to create and edit a
 new script with this command.
 
@@ -296,8 +333,8 @@ re-edit the file or throw away your changes.
 
 Activates the listed script. User may have multiple Sieve scripts on
 the server, yet only one script may be used for filtering of incoming
-messages. This is the active script. Users may have zero or one active
-scripts
+messages. This is called the active script. Users may have zero or one
+active scripts
 
 =item B<deactivate>
 
