@@ -2,16 +2,21 @@ package Net::ManageSieve::Siesh;
 
 use warnings;
 use strict;
+use autodie qw(:all);
 use File::Temp qw/tempfile/;
 use Net::ManageSieve;
 use IO::Prompt;
 use parent qw(Net::ManageSieve);
 
-our $VERSION = '0.05';
-
-sub deactivate {
+sub starttls {
     my $self = shift;
-    $self->setactive("") or $self->error($@);
+    if ( $self->debug() ) {
+        eval { require IO::Socket::SSL; IO::Socket::SSL->import qw(debug3); };
+        if ($@) {
+            die "Cannot load module IO::Socket::SSL\n";
+        }
+    }
+    $self->SUPER::starttls(@_);
 }
 
 sub movescript {
@@ -22,7 +27,7 @@ sub movescript {
     $self->deactivate() if $is_active;
 
     $self->copyscript( $source, $target );
-    $self->deletescript($source) or $self->error($@);
+    $self->deletescript($source);
 
     ## ... and activate the target later
     $self->setactive($target) if $is_active;
@@ -31,121 +36,126 @@ sub movescript {
 
 sub copyscript {
     my ( $self, $source, $target ) = @_;
-    my $content = $self->getscript($source) or $self->error($@);
-    $self->putscript( $target, $content ) or $self->error($@);
+    my $content = $self->getscript($source);
+    $self->putscript( $target, $content );
 }
 
 sub temp_scriptfile {
     my ( $self, $script, $create ) = @_;
-    my ( $fh, $filename ) = tempfile( UNLINK => 1 );
+    my ( $fh, $filename ) = eval { tempfile( UNLINK => 1 ) };
     if ( !$fh ) { $self->error($@); }
 
-    my $content = $self->getscript($script);
-    if ( !defined($content) and !$create ) { $self->error($@); }
+    my $content = '';
+    if ( $self->script_exists($script) ) {
+        $content = $self->getscript($script);
+    }
+    elsif ( !$create ) {
+        die "Script $script does not exists.\n";
+    }
 
-    $content ||= '';
-    print {$fh} $content or $self->error($!);
+    print {$fh} $content;
+    seek $fh, 0, 0;
     return $fh, $filename;
 }
 
 sub putfile {
     my ( $self, $file, $name ) = @_;
     my $script;
-    open( my $fh, '<', $file ) or $self->error($!);
-    { $/ = undef, $script = <$fh> }
+    open( my $fh, '<', $file );
+    { local $/ = undef, $script = <$fh> }
     close $fh;
-    $self->putscript( $name, $script ) or $self->error($@);
+    my $length = length $script;
+    $self->havespace( $name, $length );
+    $self->putscript( $name, $script );
 }
 
 sub getfile {
     my ( $self, $name, $file ) = @_;
-    my $script = $self->getscript($name) or $self->error($@);
-    open( my $fh, '>', $file ) or $self->error($!);
-    print {$fh} $script or $self->error($!);
+    my $script = $self->getscript($name);
+    open( my $fh, '>', $file );
+    print {$fh} $script;
     close $fh;
 }
 
 sub listscripts {
-    my $self = shift;
-    my ($scripts);
-    unless ( $scripts = $self->SUPER::listscripts() ) {
-        $self->error($@);
+    my ( $self, $unactive ) = @_;
+    my (@scripts);
+    @scripts = @{ $self->SUPER::listscripts() };
+    my $active = delete $scripts[-1];
+    if ($unactive) {
+        @scripts = grep { $_ ne $active } @scripts;
     }
-    my $active = pop @{$scripts};
-    return wantarray ? ( $scripts, $active ) : $scripts;
-}
-
-sub print_script_listing {
-    my $sieve = shift;
-    my ( $scripts, $active ) = $sieve->listscripts()
-      or die $sieve->error() . "\n";
-    for my $script ( @{$scripts} ) {
-        my $marker = '';
-        $marker = ' *' if $script eq $active;
-        print "${script}${marker}\n";
-    }
-}
-
-sub error {
-    my ( $self, $error ) = @_;
-    if ( defined($error) ) {
-        $self->_set_error($error);
-        return undef;
-    }
-    return $self->{_last_error};
-}
-
-sub cat {
-    my $sieve = shift;
-    my $content = "";
-    for my $script (@_) {
-        my $new_content = $sieve->getscript($script)
-          or die $sieve->error() . "\n";
-        $content .= $new_content;
-    }
-    print $content;
+    return @scripts;
 }
 
 sub delete {
     my $sieve = shift;
     for my $script (@_) {
-        $sieve->deletescript($script) or die $sieve->error() . "\n";
+        $sieve->deletescript($script);
     }
 }
 
 sub view_script {
-    my ($sieve,$script) = @_;
-    my ( $fh, $filename ) = $sieve->temp_scriptfile($script);
+    my ( $sieve, $script )   = @_;
+    my ( $fh,    $filename ) = $sieve->temp_scriptfile($script);
     unless ($fh) { die $sieve->error() . "\n" }
     my $pager = $ENV{'PAGER'} || "less";
-    system( $pager, $filename ) == 0 or die "$!\n";
-    close $fh;
+    no warnings 'exec';
+    eval { system( $pager, $filename ) };
+    if ($@) {
+        print "Error calling your pager application: $!\nUsing cat as fallback.\n\n";
+        $sieve->cat($script);
+    }
 }
 
 sub edit_script {
-    my ($sieve,$script) = @_;
+    my ( $sieve, $script ) = @_;
     my ( $fh, $filename ) = $sieve->temp_scriptfile( $script, 1 );
-    unless ($fh) { die $sieve->error() . "\n" }
     my $editor = $ENV{'VISUAL'} || $ENV{'EDITOR'} || "vi";
-    do {
-        system( $editor, $filename ) == 0 or die "$!\n";
-      } until (
-        $sieve->putfile( $filename, $script )
-          || !do { print "$@\n"; prompt( "Re-edit script? ", -yn ) }
-      );
+    while (1) {
+        system( $editor, $filename );
+        eval { $sieve->putfile( $filename, $script ) };
+        if ($@) {
+            print "$@\n";
+            ## There was maybe a parse error, if the user enters yes
+            ## we reedit the file, otherwise we leave it by the next last
+            next if prompt( "Re-edit script? ", -yn );
+        }
+        ## There was either no error with putfile or the user entered no
+        last;
+    }
     close $fh;
-
 }
 
-sub get_active {
-	my ($self) = @_;
-	my (undef,$active) = $self->listscripts();
-	return $active;
+sub activate {
+    my ( $self, $script ) = @_;
+    $self->setactive($script);
+}
+
+sub deactivate {
+    my $self = shift;
+    $self->setactive("");
 }
 
 sub is_active {
-	my ($self,$script) = @_;
-	return $self->get_active() eq $script;
+    my ( $self, $script ) = @_;
+    return $self->get_active() eq $script;
+}
+
+sub get_active {
+    my ($self) = @_;
+    return $self->SUPER::listscripts()->[-1];
+}
+
+sub script_exists {
+    my ( $self, $scriptname ) = @_;
+    my %script = map { $_ => 1 } $self->listscripts;
+    return defined( $script{$scriptname} );
+}
+
+sub _set_error {
+    my ( $self, $error ) = @_;
+    die $error . "\n";
 }
 
 1;    # End of Net::ManageSieve::Siesh
@@ -154,7 +164,7 @@ __END__
 
 =head1 NAME
 
-Net::ManageSieve::Siesh - Expanding ManagieSieve beyond the Protocol
+Net::ManageSieve::Siesh - Expanding Net::ManagieSieve beyond the pure protocol
 
 =head1 VERSION
 
@@ -177,6 +187,10 @@ deactivating scripts, copy and move them etc.
 If you're just searching for a comamnd line interface to ManageSieve,
 please take a look at C<siesh(1)>.
 
+=head1 ERROR HANDLING
+
+Unlike L<Net::ManagieSieve> this library just croaks in the case of error. Nothing wrong with that!
+
 =head1 METHODS
 
 =over 4
@@ -186,6 +200,11 @@ please take a look at C<siesh(1)>.
 Deactivates all active scripts on the server. This has
 the same effect as using the function setactive with an empty string
 as argument.
+
+=item C<activate()>
+
+Activates the scripts. This is identical to call setactive, but is easier
+to remember.
 
 =item C<movescript($oldscriptname,$newscriptname)>
 
@@ -215,15 +234,10 @@ Downloads the script names <$scriptname> to the file specified by C<$file>.
 
 =item C<listscripts()>
 
-Returns a list of scripts and the active script. This function overwrites
-listscripts provided by Net::ManageSieve in order to return a more
-sane data structure. It returns a reference to an array, that holds all
-scripts, and a scalar with the name of the active script in list context
-and just the array reference in scalar context.  =item C<error()>
-
-Returns $@ or $! of a previous failed method. Please notice, that this
-method overwrites the method of the same name in C<Net::ManageSieve>
-and just returns the error mesage itself.
+Returns a list of scripts. This function overwrites listscripts
+provided by Net::ManageSieve in order to return a array. To get the
+active script call get_active. If the first paramter is true only
+the active script is not returned.
 
 =item C<is_active($script)>
 
@@ -233,6 +247,14 @@ Returns true if $script is the currently active script and false if not.
 
 Returns the name of the currently active script and the empty string if
 there is not active script.
+
+=item C<script_exists($script)>
+
+Check if $script exists on server.
+
+=item C<delete(@scripts)>
+
+Delete all @scripts.
 
 =back
 
