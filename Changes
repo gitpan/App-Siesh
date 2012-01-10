@@ -1,5 +1,10 @@
 Revision history for App-Siesh
 
+0.21    2012-01-10
+
+	Fix "Use of qw(...) as parentheses is deprecated" under 5.14
+	[patch by atomicstack]
+
 0.20	2009-08-01
 
 	added first test to the distribution

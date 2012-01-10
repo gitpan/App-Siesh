@@ -40,12 +40,10 @@ if(!$config{password}) {
 	$config{password} = prompt( "Password: ", -e => '*' );
 }
 
-my ( $fh, $tempfile );
-
 if ( !is_interactive(*STDIN) ) {
     $config{file} = IO::Handle->new_from_fd( *STDIN, 'r' );
 }
-elsif ( $config{command} and !$config{file} ) {
+elsif ( $config{command} and not $config{file} ) {
     my $fh = IO::File->new_tmpfile();
 
     for my $command ( @{ $config{command} } ) {

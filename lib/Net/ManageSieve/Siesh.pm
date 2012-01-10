@@ -9,14 +9,17 @@ use IO::Prompt;
 use parent qw(Net::ManageSieve);
 
 sub starttls {
-    my $self = shift;
+    my ( $self, @args ) = @_;
     if ( $self->debug() ) {
-        eval { require IO::Socket::SSL; IO::Socket::SSL->import qw(debug3); };
-        if ($@) {
+        eval {
+            require IO::Socket::SSL;
+            IO::Socket::SSL->import('debug3');
+            1;
+        } or do {
             die "Cannot load module IO::Socket::SSL\n";
-        }
+          }
     }
-    $self->SUPER::starttls(@_);
+    return $self->SUPER::starttls(@args);
 }
 
 sub movescript {
@@ -37,13 +40,13 @@ sub movescript {
 sub copyscript {
     my ( $self, $source, $target ) = @_;
     my $content = $self->getscript($source);
-    $self->putscript( $target, $content );
+    return $self->putscript( $target, $content );
 }
 
 sub temp_scriptfile {
     my ( $self, $script, $create ) = @_;
-    my ( $fh, $filename ) = eval { tempfile( UNLINK => 1 ) };
-    if ( !$fh ) { $self->error($@); }
+    my ( $fh, $filename );
+    eval { ( $fh, $filename ) = tempfile( UNLINK => 1 ); 1; } or do { die $@ };
 
     my $content = '';
     if ( $self->script_exists($script) ) {
@@ -66,7 +69,7 @@ sub putfile {
     close $fh;
     my $length = length $script;
     $self->havespace( $name, $length );
-    $self->putscript( $name, $script );
+    return $self->putscript( $name, $script );
 }
 
 sub getfile {
@@ -74,7 +77,7 @@ sub getfile {
     my $script = $self->getscript($name);
     open( my $fh, '>', $file );
     print {$fh} $script;
-    close $fh;
+    return close $fh;
 }
 
 sub listscripts {
@@ -88,11 +91,12 @@ sub listscripts {
     return @scripts;
 }
 
-sub delete {
-    my $sieve = shift;
-    for my $script (@_) {
-        $sieve->deletescript($script);
+sub deletescript {
+    my ( $sieve, @scripts ) = @_;
+    for my $script (@scripts) {
+        $sieve->SUPER::deletescript($script);
     }
+    return 1;
 }
 
 sub view_script {
@@ -101,11 +105,12 @@ sub view_script {
     unless ($fh) { die $sieve->error() . "\n" }
     my $pager = $ENV{'PAGER'} || "less";
     no warnings 'exec';
-    eval { system( $pager, $filename ) };
-    if ($@) {
-        print "Error calling your pager application: $!\nUsing cat as fallback.\n\n";
+    eval { system( $pager, $filename ); 1; } or do {
+        print
+"Error calling your pager application: $!\nUsing cat as fallback.\n\n";
         $sieve->cat($script);
-    }
+    };
+    return 1;
 }
 
 sub edit_script {
@@ -114,27 +119,26 @@ sub edit_script {
     my $editor = $ENV{'VISUAL'} || $ENV{'EDITOR'} || "vi";
     while (1) {
         system( $editor, $filename );
-        eval { $sieve->putfile( $filename, $script ) };
-        if ($@) {
+        eval { $sieve->putfile( $filename, $script ); 1; } or do {
             print "$@\n";
             ## There was maybe a parse error, if the user enters yes
             ## we reedit the file, otherwise we leave it by the next last
             next if prompt( "Re-edit script? ", -yn );
-        }
+        };
         ## There was either no error with putfile or the user entered no
         last;
     }
-    close $fh;
+    return close $fh;
 }
 
 sub activate {
     my ( $self, $script ) = @_;
-    $self->setactive($script);
+    return $self->setactive($script);
 }
 
 sub deactivate {
     my $self = shift;
-    $self->setactive("");
+    return $self->setactive("");
 }
 
 sub is_active {
@@ -151,11 +155,6 @@ sub script_exists {
     my ( $self, $scriptname ) = @_;
     my %script = map { $_ => 1 } $self->listscripts;
     return defined( $script{$scriptname} );
-}
-
-sub _set_error {
-    my ( $self, $error ) = @_;
-    die $error . "\n";
 }
 
 1;    # End of Net::ManageSieve::Siesh
@@ -252,7 +251,7 @@ there is not active script.
 
 Check if $script exists on server.
 
-=item C<delete(@scripts)>
+=item C<deletescript(@scripts)>
 
 Delete all @scripts.
 

@@ -1,11 +1,13 @@
 package App::Siesh::Batch;
 
+use strict;
+use warnings;
 
 sub ReadLine { return __PACKAGE__ };
 
 sub new {
 	my ($class,$fh) = @_;
-	bless { handle => $fh }, $class;
+	return bless { handle => $fh }, $class;
 }
 
 sub readline {
@@ -17,6 +19,7 @@ sub readline {
 		chomp(my $line = $fh->getline());
 		return $line;
 	}
+	return;
 }
 
 sub history_expand { }

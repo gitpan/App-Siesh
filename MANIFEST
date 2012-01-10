@@ -12,3 +12,4 @@ lib/Net/ManageSieve/Siesh.pm
 t/00-load.t
 t/01-basic.t
 t/02-batch.t
+META.json

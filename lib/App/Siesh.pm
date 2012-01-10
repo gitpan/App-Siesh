@@ -7,7 +7,7 @@ use Term::ShellUI;
 use Net::ManageSieve::Siesh;
 use App::Siesh::Batch;
 
-our $VERSION = '0.20';
+our $VERSION = '0.21';
 
 sub read_config {
     my ($class,$file) = @_;
@@ -35,18 +35,16 @@ sub run {
 
     my @params;
 
-    foreach ( qw(debug port) ) {
+    foreach ( qw(debug port tls) ) {
         push @params, ucfirst($_), $config{$_}
           if defined $config{$_};
     }
 
-    ## Okay, this is counterintuative ... tls is the only options
-    ## for Net::ManageSieve contruction not ucfirsted.
-    ## TODO: Send in a patch
-    push @params, tls => $config{tls};
-
-    my $sieve = Net::ManageSieve::Siesh->new( $config{host}, @params )
-      or die "Can't connect to $config{host}: $!\n";
+    my $sieve = Net::ManageSieve::Siesh->new(
+        $config{host},
+        on_fail => sub { die "$_[1]\n" },
+        @params
+    ) or die "Can't connect to $config{host}: $!\n";
 
     $sieve->auth( $config{user}, $config{password} ) or die "$@\n";
 
@@ -118,9 +116,9 @@ sub run {
                 proc    => sub { 
 			if ( $_[0] eq '*' ) {
 				$sieve->deactivate();
-				$sieve->delete($sieve->listscripts);
+				$sieve->deletescript($sieve->listscripts);
 			} else {
-				$sieve->delete(@_);
+				$sieve->deletescript(@_);
 			}
 		},
                 args    => sub { complete_scripts( @_, $sieve ) },
@@ -171,7 +169,7 @@ sub run {
     
     #$term->{debug_complete}=5;
     $term->{term}->ornaments(0);
-    $term->run();
+    return $term->run();
 }
 
 sub complete_script_and_file {
